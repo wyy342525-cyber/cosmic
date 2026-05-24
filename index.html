@@ -1,0 +1,1405 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>宇宙精神观测站</title>
+    <!-- 引入 html2canvas 核心库 -->
+    <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+    <style>
+        :root {
+            --bg-color: #06050a;
+            --dusty-blue: #5a738e;       /* 莫兰迪尘埃蓝 */
+            --muted-purple: #6b5c75;     /* 莫兰迪暮色紫 */
+            --starlight-silver: #a0aab5;  /* 钛星银 */
+            --obsidian-dark: rgba(14, 12, 22, 0.85);
+            --thin-border: rgba(90, 115, 142, 0.22);
+            --glass-blur: blur(10px);
+            --scanner-size: 140px;        /* 动态对焦变量 */
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        /* 极细低饱和度滚轮样式 */
+        ::-webkit-scrollbar {
+            width: 3px;
+        }
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: rgba(90, 115, 142, 0.25);
+            border-radius: 10px;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: #ffffff;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            min-height: 100dvh; /* 动态视口高度，自动扣除移动端工具栏 */
+            overflow: hidden;
+            width: 100vw;
+        }
+
+        /* 宇宙观测容器 - 移动端全屏自适应，桌面端保持精致手机模型 */
+        .tarot-container {
+            width: 100%;
+            max-width: 412px;
+            height: 100vh;
+            height: 100dvh; /* 动态视口高度贴合 */
+            background: rgba(6, 5, 10, 0.94);
+            border: none;
+            position: relative;
+            z-index: 2;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            padding-bottom: env(safe-area-inset-bottom); /* 适配 iOS 底部小黑条 */
+            transition: box-shadow 0.4s ease;
+        }
+
+        /* 📡 核心动效：视口四周暗角遮罩（Vignette Overlay）用于模拟黑洞吞没周边的视觉呼吸 */
+        .tarot-container::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: radial-gradient(circle, transparent 40%, rgba(0, 0, 0, 0.9) 140%);
+            z-index: 4; /* 处于 Canvas 之上，UI 文本之下 */
+            pointer-events: none;
+            opacity: 0.4;
+            transition: opacity 0.9s cubic-bezier(0.16, 1, 0.3, 1);
+            will-change: opacity;
+        }
+
+        /* 引力跃迁激活态：屏幕四周猛烈变暗 */
+        .tarot-container.warping::before {
+            opacity: 0.95;
+        }
+
+        /* 引力跃迁激活态：0.4px 级别极克制、高级的机身微震动 */
+        .tarot-container.warping {
+            animation: cameraMicroShake 0.6s ease-in-out;
+        }
+
+        @keyframes cameraMicroShake {
+            0%, 100% { transform: translate(0, 0); }
+            20% { transform: translate(-0.4px, 0.4px); }
+            40% { transform: translate(0.4px, -0.4px); }
+            60% { transform: translate(-0.4px, -0.4px); }
+            80% { transform: translate(0.4px, 0.4px); }
+        }
+
+        /* 渲染高性能星空与3D引力透镜黑洞的 Canvas (置于容器最底层) */
+        #space-canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+            pointer-events: none; /* 穿透属性：绝不抢夺、干扰任何按钮的点击事件 */
+        }
+
+        /* 桌面端展示框架 */
+        @media (min-width: 480px) {
+            .tarot-container {
+                height: 820px;
+                border-radius: 36px;
+                border: 1px solid var(--thin-border);
+                box-shadow: 0 40px 100px rgba(0, 0, 0, 0.95), inset 0 0 30px rgba(90, 115, 142, 0.03);
+            }
+        }
+
+        .view-wrapper {
+            flex: 1;
+            position: relative;
+            overflow-y: auto;
+            padding: 24px;
+            display: flex;
+            flex-direction: column;
+            z-index: 5; /* 保证文本在暗角层上方 */
+            pointer-events: auto;
+        }
+
+        /* ==================== 📡 核心重构：彻底避开首屏加载卡死 Bug 的高级切页动效 ==================== */
+        .view {
+            display: none;
+            height: 100%;
+            flex-direction: column;
+            width: 100%;
+        }
+
+        /* 激活态：首页默认直接显示，完全避开加载卡死 */
+        .view.active {
+            display: flex;
+        }
+
+        /* 仅在页面主动切换时，由 JS 附加的 1.0 秒引力坍缩、失焦上浮退后动画 */
+        .warp-out {
+            animation: warpOutAnim 0.9s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+            will-change: transform, opacity, filter;
+        }
+
+        /* 仅在页面主动切换时，由 JS 附加的 1.0 秒新页面自深空“由大到正常”拉近浮现动画 */
+        .warp-in {
+            animation: warpInAnim 0.9s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+            will-change: transform, opacity, filter;
+        }
+
+        @keyframes warpOutAnim {
+            0% { opacity: 1; filter: blur(0px); transform: translateY(0) scale(1); }
+            100% { opacity: 0; filter: blur(14px); transform: translateY(-10px) scale(0.96); }
+        }
+
+        @keyframes warpInAnim {
+            0% { opacity: 0; filter: blur(20px); transform: translateY(30px) scale(1.04); }
+            100% { opacity: 1; filter: blur(0px); transform: translateY(0) scale(1); }
+        }
+
+        /* 极简星河排版 */
+        h1 {
+            font-size: 21px;
+            text-align: center;
+            color: var(--starlight-silver);
+            font-weight: 300;
+            letter-spacing: 4px;
+            text-transform: uppercase;
+            text-shadow: 0 0 30px rgba(90, 115, 142, 0.1);
+        }
+
+        .subtitle {
+            font-size: 11px;
+            color: var(--starlight-silver);
+            text-align: center;
+            margin-top: 8px;
+            margin-bottom: 25px;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            opacity: 0.65;
+        }
+
+        /* 首页：3D 黑洞与扫描仪公用排版框架 */
+        .blackhole-placeholder, .scanner-placeholder {
+            position: relative;
+            width: 340px; 
+            height: 340px;
+            margin: 15px auto 20px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 10;
+        }
+
+        /* 2. 表单页：选择器与文本排版 */
+        #view-create label {
+            font-size: 11px;
+            color: var(--starlight-silver);
+            letter-spacing: 1.5px;
+            margin-bottom: 8px;
+            display: block;
+            text-transform: uppercase;
+            opacity: 0.85;
+        }
+
+        .grid-selector {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 8px;
+            margin-bottom: 22px;
+            max-height: 155px;
+            overflow-y: auto;
+            padding: 4px;
+            border-bottom: 0.5px solid rgba(255,255,255,0.04);
+        }
+
+        .rune-item {
+            background: rgba(10, 6, 18, 0.7);
+            border: 0.5px solid rgba(255, 255, 255, 0.06);
+            border-radius: 6px; 
+            height: 44px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            cursor: pointer;
+            transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+            font-size: 11px;
+            color: var(--starlight-silver);
+            letter-spacing: 0.5px;
+            opacity: 0.8;
+        }
+
+        .rune-item.active {
+            background: rgba(90, 115, 142, 0.08);
+            border-color: var(--starlight-silver);
+            color: #fff;
+            box-shadow: 0 0 12px rgba(90, 115, 142, 0.2);
+        }
+
+        /* 极细银河之眼扫描仪 - 物理中心对齐，尺寸完全绑定黑洞直径 */
+        .galactic-eye {
+            position: relative;
+            width: var(--scanner-size);
+            height: var(--scanner-size);
+            border: 0.5px solid rgba(90, 115, 142, 0.25);
+            border-radius: 50%;
+            animation: pulseScanner 2.5s infinite ease-in-out;
+            overflow: hidden; 
+        }
+
+        .galactic-line {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 2px;
+            background: linear-gradient(90deg, transparent, rgba(90, 115, 142, 0.8), transparent);
+            animation: scanLine 2.5s infinite ease-in-out;
+            will-change: transform; 
+        }
+
+        @keyframes pulseScanner {
+            0%, 100% { transform: scale(1); box-shadow: 0 0 15px rgba(90, 115, 142, 0.05); }
+            50% { transform: scale(1.06); box-shadow: 0 0 30px rgba(90, 115, 142, 0.2); }
+        }
+
+        /* 基于 CSS 变量的自适应 GPU 硬件加速扫描轨道 */
+        @keyframes scanLine {
+            0% { transform: translateY(0); }
+            50% { transform: translateY(var(--scanner-size)); } 
+            100% { transform: translateY(0); }
+        }
+
+        /* 输入箱 */
+        .cosmic-input-group {
+            margin-top: 15px;
+        }
+
+        .cosmic-textarea {
+            width: 100%;
+            height: 120px;
+            background: rgba(6, 4, 12, 0.95);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            border-radius: 12px;
+            color: #ffffff;
+            padding: 16px;
+            font-size: 13.5px;
+            line-height: 1.6;
+            outline: none;
+            resize: none;
+            transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+            box-shadow: inset 0 2px 10px rgba(0,0,0,0.8);
+        }
+
+        .cosmic-textarea::placeholder {
+            color: var(--starlight-silver);
+            font-size: 12px;
+            letter-spacing: 0.5px;
+            opacity: 0.6;
+        }
+
+        .cosmic-textarea:focus {
+            border-color: var(--dusty-blue);
+            box-shadow: inset 0 2px 10px rgba(0,0,0,0.8), 0 0 15px rgba(90, 115, 142, 0.15);
+        }
+
+        /* 情绪报告卡牌 */
+        .destiny-tarot-card {
+            background: rgba(14, 12, 22, 0.7);
+            backdrop-filter: var(--glass-blur);
+            -webkit-backdrop-filter: var(--glass-blur);
+            border-radius: 20px;
+            padding: 26px;
+            margin-bottom: 24px;
+            box-shadow: 0 20px 45px rgba(0, 0, 0, 0.7);
+            border: 1px solid rgba(90, 115, 142, 0.35);
+            outline: 0.5px solid rgba(90, 115, 142, 0.12);
+            outline-offset: -5px;
+            position: relative;
+        }
+
+        /* 宇宙信号雷达接收舱样式 */
+        .radar-switch-panel {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: rgba(14, 12, 22, 0.6);
+            border: 0.5px solid rgba(90, 115, 142, 0.25);
+            padding: 12px 16px;
+            border-radius: 24px;
+            margin-bottom: 12px;
+            backdrop-filter: var(--glass-blur);
+            -webkit-backdrop-filter: var(--glass-blur);
+        }
+
+        .radar-info {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+
+        .radar-label {
+            font-size: 11px;
+            color: var(--starlight-silver);
+            letter-spacing: 1px;
+        }
+
+        .radar-status {
+            font-size: 9px;
+            color: rgba(90, 115, 142, 0.75);
+            letter-spacing: 0.5px;
+            transition: color 0.3s ease;
+        }
+
+        .radar-toggle-container {
+            width: 44px;
+            height: 20px;
+            background: rgba(10, 6, 18, 0.8);
+            border: 0.5px solid rgba(90, 115, 142, 0.3);
+            border-radius: 10px;
+            position: relative;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .radar-toggle-node {
+            width: 14px;
+            height: 14px;
+            background: var(--starlight-silver);
+            border-radius: 50%;
+            position: absolute;
+            top: 2px;
+            left: 2px;
+            transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        /* 按钮系统 */
+        .btn-premium-cosmic {
+            background: #ffffff; /* 白曜瓷纯色 */
+            color: #06050a;      /* 纯黑文字 */
+            font-weight: bold;
+            letter-spacing: 3px; /* 宽字距 */
+            text-transform: uppercase;
+            border: none;
+            width: 100%;
+            height: 54px;         /* 锁死高度 */
+            border-radius: 24px;  /* 柔和温润大圆角 */
+            font-size: 11px;     
+            cursor: pointer;
+            box-shadow: 0 4px 20px rgba(255, 255, 255, 0.05);
+            text-align: center;
+            transition: all 0.3s ease;
+        }
+
+        .btn-premium-cosmic:active {
+            background: #e2e8f0;
+            transform: scale(0.98);
+        }
+
+        .btn-premium-outline {
+            background: transparent;
+            color: #ffffff;
+            border: 0.5px solid rgba(255, 255, 255, 0.2); /* 钛银极细框线 */
+            font-weight: bold;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            padding: 15px;
+            border-radius: 24px;  /* 柔和温润大圆角 */
+            font-size: 11px;     
+            cursor: pointer;
+            margin-bottom: 12px;
+            text-align: center;
+            transition: all 0.3s ease;
+        }
+
+        .btn-premium-outline:active {
+            border-color: #ffffff;
+            transform: scale(0.98);
+        }
+
+        /* 标签 */
+        .tag-cloud {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-bottom: 15px;
+        }
+
+        .tag {
+            font-size: 10px;
+            background: rgba(90, 115, 142, 0.04);
+            color: var(--starlight-silver);
+            padding: 3px 8px;
+            border-radius: 4px;
+            border: 0.5px solid rgba(90, 115, 142, 0.15);
+            opacity: 0.9;
+        }
+
+        /* ==================== 📱 核心自适应微缩算法（在短屏下完美控制比例） ==================== */
+        @media (max-height: 740px) {
+            :root {
+                --scanner-size: 100px; /* 矮屏幕动态更改扫描仪对焦物理参数 */
+            }
+            .view-wrapper {
+                padding: 16px;
+            }
+            h1 {
+                font-size: 19px;
+            }
+            .subtitle {
+                margin-bottom: 15px;
+                font-size: 10px;
+            }
+            .blackhole-placeholder, .scanner-placeholder {
+                width: 220px; /* 矮屏幕自动等比缩窄，对齐中心 */
+                height: 220px;
+                margin: 5px auto 10px;
+            }
+            .radar-switch-panel {
+                height: 44px; /* 高度等比缩小 */
+                padding: 0 16px;
+                border-radius: 20px;
+                margin-bottom: 10px;
+            }
+            .radar-label {
+                font-size: 10px;
+            }
+            .radar-status {
+                font-size: 8px;
+            }
+            .radar-toggle-container {
+                width: 44px;
+                height: 20px;
+                border-radius: 10px;
+            }
+            .radar-toggle-node {
+                width: 14px;
+                height: 14px;
+                top: 2px;
+                left: 2px;
+            }
+            .grid-selector {
+                max-height: 100px;
+                margin-bottom: 12px;
+            }
+            .rune-item {
+                height: 36px;
+                font-size: 10px;
+            }
+            .cosmic-textarea {
+                height: 85px; 
+                padding: 10px;
+            }
+            .destiny-tarot-card {
+                padding: 16px;
+                margin-bottom: 16px;
+            }
+            #card-body {
+                min-height: 90px;
+                font-size: 12px;
+                line-height: 1.6;
+            }
+            .btn-premium-cosmic {
+                height: 44px; /* 高度等比缩小 */
+                border-radius: 20px;
+                font-size: 11px;
+            }
+            .btn-premium-outline {
+                padding: 12px;
+                border-radius: 20px;
+                font-size: 11px;
+                margin-bottom: 8px;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="tarot-container">
+        <!-- 🌠 内置 Canvas：置于 container 最底层，全真机透光渲染 3D 引力黑洞与星群 -->
+        <canvas id="space-canvas"></canvas>
+
+        <div class="view-wrapper">
+            
+            <!-- 1. 首页 -->
+            <div class="view active" id="view-home">
+                <div style="margin-top: 15px;">
+                    <h1>宇宙精神观测站</h1>
+                    <div class="subtitle" style="margin-top: 8px;">LATE NIGHT OBSERVATORY</div>
+                </div>
+
+                <!-- 首页3D黑洞占位区：Canvas 通过获取此 DOM 的几何信息，在此处实时渲染 3D 物理引力黑洞 -->
+                <div class="blackhole-placeholder" id="bh-anchor">
+                    <!-- 深夜心里话电波，大比例加倍，完美融入Canvas 3D黑洞核心 -->
+                    <div style="text-align: center; width: 85%; font-size: 10px; line-height: 1.8; color: var(--starlight-silver); opacity: 0.75; letter-spacing: 0.5px; z-index: 10;" id="bh-text">
+                        星河无声流动<br>观测站正在监听<br>你的精神频段
+                    </div>
+                </div>
+
+                <!-- 爆点控制面板：今日宇宙观测公报 + 实体打捞开关 + 发射共振按钮 -->
+                <div style="margin-top: auto; margin-bottom: 10px; display: flex; flex-direction: column; gap: 12px; width: 100%;">
+                    
+                    <!-- 1. 宇宙信号雷达接收舱 -->
+                    <div class="radar-switch-panel">
+                        <div class="radar-info">
+                            <span class="radar-label">宇宙信号雷达接收舱</span>
+                            <span class="radar-status" id="radar-status-text">接收状态：等待捕获 / STANDBY</span>
+                        </div>
+                        <div class="radar-toggle-container" onclick="toggleRadar()">
+                            <div class="radar-toggle-node" id="radar-toggle-node"></div>
+                        </div>
+                    </div>
+
+                    <!-- 2. 发射共振波长主按钮 -->
+                    <button class="btn-premium-cosmic" onclick="initEmitResonance()">校准我的专属情绪波长 / CALIBRATE SPECTRUM</button>
+                    
+                </div>
+            </div>
+
+            <!-- 2. 表单页：命运选择仪式 -->
+            <div class="view" id="view-create">
+                <h1 style="font-size: 18px; letter-spacing: 2px;">校准精神波段</h1>
+                <div class="subtitle" id="create-subtitle">情绪测绘舱：准备载入星区及认知逻辑</div>
+
+                <!-- 12星宫选择器 -->
+                <label>校准星区引力轨道 (ZODIAC)</label>
+                <div class="grid-selector" id="grid-zodiac">
+                    <!-- JS 自动生成 12 星宫 -->
+                </div>
+
+                <!-- 16灵魂符文卡选择器 -->
+                <label>锁定认知量子脉冲 (MBTI)</label>
+                <div class="grid-selector" id="grid-mbti">
+                    <!-- JS 自动生成 16 种 MBTI -->
+                </div>
+
+                <div class="cosmic-input-group">
+                    <label>向深空发射微弱情绪声波 (WHISPER)</label>
+                    <textarea class="cosmic-textarea" id="txt-content" placeholder="请输入你今晚最真实的情绪波动... 宇宙会替你保密。"></textarea>
+                </div>
+
+                <button class="btn-premium-cosmic" onclick="requestCozeAI()">开始灵魂扫描</button>
+                <button class="btn-premium-outline" onclick="switchView('view-home')">返回星盘</button>
+            </div>
+
+            <!-- 3. AI 解析扫描等待页 -->
+            <div class="view" id="view-loading">
+                <!-- 📡 完美的布局对齐：模拟首页 H1 的上下边距、高度与文本比例，将扫描仪的物理中心完美契合 3D 黑洞中心 -->
+                <div style="margin-top: 15px;">
+                    <h1 style="visibility: hidden; font-size: 21px; height: 25px; margin: 0;"></h1>
+                    <div class="subtitle" style="margin-top: 8px; visibility: hidden; margin-bottom: 25px;"></div>
+                </div>
+
+                <!-- 与首页 blackhole-placeholder 100% 物理对齐的扫描仪定位舱 -->
+                <div class="scanner-placeholder">
+                    <div class="galactic-eye">
+                        <div class="galactic-line"></div>
+                    </div>
+                </div>
+
+                <!-- 宇宙扫描控制面板底部 -->
+                <div style="text-align: center; margin-top: auto; margin-bottom: 20px;">
+                    <h3 style="color:var(--starlight-silver); letter-spacing:2px; font-weight: 300; margin-bottom: 10px;" id="loading-title">正在扫描潜意识频段...</h3>
+                    <p style="color: var(--starlight-silver); font-size: 11px; letter-spacing: 1px;" id="loading-tip">正在建立宇宙共鸣星系波段...</p>
+                </div>
+            </div>
+
+            <!-- 4. 结果页：宇宙共振频率报告 -->
+            <div class="view" id="view-result">
+                <h1 style="font-size: 18px; letter-spacing: 2px;">宇宙共振频率报告</h1>
+                <div class="subtitle" id="result-subtitle">在无垠星河中，成功捕捉到你的专属波长</div>
+
+                <!-- 情绪报告结果卡牌 -->
+                <div class="destiny-tarot-card" id="tarot-card-render">
+                    <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 0.5px solid rgba(90, 115, 142, 0.25); padding-bottom: 12px; margin-bottom: 16px;">
+                        <span id="card-nickname" style="font-weight: 400; color: var(--starlight-silver); font-size: 14px; letter-spacing: 1px;">正在解封...</span>
+                        <span id="card-channel" style="font-size: 9px; color: var(--starlight-silver); background: rgba(90, 115, 142, 0.05); padding: 3px 8px; border-radius: 3px; border:0.5px solid rgba(90, 115, 142, 0.2); letter-spacing: 1px;">SIGNAL DECODED</span>
+                    </div>
+                    <div id="card-body" style="font-size: 13px; line-height: 1.8; min-height: 120px; margin-bottom: 16px; color: #e4e4e7; text-align: justify; white-space: pre-line; letter-spacing: 0.5px;">
+                        加载中...
+                    </div>
+                    <div class="tag-cloud" id="card-tags">
+                        <!-- 动态生成的标签 -->
+                    </div>
+                    <div id="card-echo" style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; font-size: 11px; color: var(--starlight-silver); border: 0.5px solid rgba(255,255,255,0.03); line-height: 1.4; letter-spacing: 0.5px;">
+                        宇宙星云回响测算中...
+                    </div>
+                </div>
+
+                <!-- 动态按钮承载区 -->
+                <div id="result-action-area" style="display: flex; flex-direction: column;">
+                    <!-- JS动态注入 -->
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <script>
+        // ==================== 🛠️ 配置 API 参数 ====================
+        const COZE_API_KEY = 'pat_O31SO4ZU7EHn9iNrZ6HRKoPknokEdoKcc3dKny9G22JQ1tTPcALzqFcwmmmNxWhV'; 
+        const BOT_ID = '7642991779373645843';       
+        // =========================================================================
+
+        let currentAIData = null;
+        let tipTimer = null;
+        let chosenTarot = "";
+        let isViewingOthers = false; 
+        let radarActive = false;     
+
+        // 星系黑洞与跃迁物理参数 (全局定义)
+        let bh_horizon = window.innerHeight < 740 ? 50 : 70; 
+        let current_bh_horizon = bh_horizon;
+        let transitionActive = false;
+        let transitionProgress = 0; // 0 到 1 的物理位移因子
+        let halo_opacity_multiplier = 1.0;
+        let star_speed_multiplier = 1.0;
+        let gravity_collapse = false; // 是否触发引力坍缩收缩
+
+        // 12 星座配置数据
+        const constellations = [
+            { id: "白羊座", glyph: "Aries / 白羊" }, { id: "金牛座", glyph: "Taurus / 金牛" },
+            { id: "双子座", glyph: "Gemini / 双子" }, { id: "巨蟹座", glyph: "Cancer / 巨蟹" },
+            { id: "狮子座", glyph: "Leo / 狮子" }, { id: "处女座", glyph: "Virgo / 处女" },
+            { id: "天秤座", glyph: "Libra / 天秤" }, { id: "天蝎座", glyph: "Scorpio / 天蝎" },
+            { id: "射手座", glyph: "Sagittarius / 射手" }, { id: "摩羯座", glyph: "Capricorn / 摩羯" },
+            { id: "水瓶座", glyph: "Aquarius / 水瓶" }, { id: "双鱼座", glyph: "Pisces / 双鱼" }
+        ];
+
+        // 16 种 MBTI 配置数据
+        const mbtiTypes = [
+            "INTJ", "INTP", "ENTJ", "ENTP", "INFJ", "INFP", "ENFJ", "ENFP",
+            "ISTJ", "ISFJ", "ESTJ", "ESFJ", "ISTP", "ISFP", "ESTP", "ESFP"
+        ];
+
+        // 初始化选择器
+        const gridZodiac = document.getElementById('grid-zodiac');
+        const gridMbti = document.getElementById('grid-mbti');
+        let selectedZodiac = "";
+        let selectedMbti = "";
+
+        constellationInit();
+        mbtiInit();
+
+        function constellationInit() {
+            gridZodiac.innerHTML = '';
+            constellations.forEach(c => {
+                const item = document.createElement('div');
+                item.className = 'rune-item';
+                item.innerText = c.glyph;
+                item.onclick = () => {
+                    document.querySelectorAll('#grid-zodiac .rune-item').forEach(el => el.classList.remove('active'));
+                    if (selectedZodiac === c.id) {
+                        selectedZodiac = "";
+                    } else {
+                        selectedZodiac = c.id;
+                        item.classList.add('active');
+                    }
+                };
+                gridZodiac.appendChild(item);
+            });
+        }
+
+        function mbtiInit() {
+            gridMbti.innerHTML = '';
+            mbtiTypes.forEach(m => {
+                const item = document.createElement('div');
+                item.className = 'rune-item';
+                item.innerText = m;
+                item.onclick = () => {
+                    document.querySelectorAll('#grid-mbti .rune-item').forEach(el => el.classList.remove('active'));
+                    if (selectedMbti === m) {
+                        selectedMbti = "";
+                    } else {
+                        selectedMbti = m;
+                        item.classList.add('active');
+                    }
+                };
+                gridMbti.appendChild(item);
+            });
+        }
+
+        // 主动发射情绪共振逻辑
+        function initEmitResonance() {
+            isViewingOthers = false; 
+            switchView('view-create');
+        }
+
+        // ==================== 📡 核心技术：Framer Motion 级引力波跳级切换机制 ====================
+        // 引力坍缩跃迁算法
+        function startWarpTransition() {
+            transitionActive = true;
+            transitionProgress = 0;
+            gravity_collapse = true;
+
+            const container = document.querySelector('.tarot-container');
+            container.classList.add('warping'); // 物理微震与暗角收缩激活
+
+            const duration = 1000; // 严格控时 1s 电影级过渡
+            const start = Date.now();
+
+            function updateWarp() {
+                const elapsed = Date.now() - start;
+                const progress = Math.min(1, elapsed / duration);
+                transitionProgress = progress;
+
+                // 进场黑洞视界、光晕及星轨速度爆发式激增（30%到达顶峰，随后衰减）
+                if (progress < 0.3) {
+                    const peak = progress / 0.3;
+                    current_bh_horizon = bh_horizon * (1.0 + 0.16 * peak);
+                    halo_opacity_multiplier = 1.0 + 1.2 * peak;
+                    star_speed_multiplier = 1.0 + 4.0 * peak;
+                } else {
+                    const decay = (1.0 - progress) / 0.7;
+                    current_bh_horizon = bh_horizon * (1.0 + 0.16 * decay);
+                    halo_opacity_multiplier = 1.0 + 1.2 * decay;
+                    star_speed_multiplier = 1.0 + 4.0 * decay;
+                }
+
+                if (progress < 1) {
+                    requestAnimationFrame(updateWarp);
+                } else {
+                    // 全状态平稳复位
+                    transitionActive = false;
+                    gravity_collapse = false;
+                    current_bh_horizon = bh_horizon;
+                    halo_opacity_multiplier = 1.0;
+                    star_speed_multiplier = 1.0;
+                    container.classList.remove('warping');
+                }
+            }
+            requestAnimationFrame(updateWarp);
+        }
+
+        // 切换视图（完全重构为：失焦后退 -> 黑洞跃迁吸附 -> 新页面从深空拉近浮现，安全避开加载卡死）
+        function switchView(viewId) {
+            const currentActive = document.querySelector('.view.active');
+            const targetView = document.getElementById(viewId);
+            
+            if (currentActive && currentActive.id !== viewId) {
+                // 1. 触发引力坍缩与四周暗度脉冲
+                startWarpTransition();
+
+                // 2. 旧页面加动画类失焦淡出
+                currentActive.classList.add('warp-out');
+                currentActive.classList.remove('active');
+
+                // 3. 400毫秒延迟（在黑洞吸附最深处）将新页面从深空拉近并淡入
+                setTimeout(() => {
+                    currentActive.style.display = 'none';
+                    currentActive.classList.remove('warp-out');
+                    
+                    targetView.style.display = 'flex';
+                    targetView.classList.add('active', 'warp-in');
+                    
+                    // 动画结束后清除该入场类，避免干扰后续动作
+                    setTimeout(() => {
+                        targetView.classList.remove('warp-in');
+                    }, 900);
+                }, 400);
+            } else {
+                // 首次进入无感初始化
+                document.querySelectorAll('.view').forEach(v => {
+                    v.style.display = 'none';
+                    v.classList.remove('active', 'warp-out', 'warp-in');
+                });
+                targetView.style.display = 'flex';
+                targetView.classList.add('active');
+            }
+        }
+
+        // 首页实体雷达开关打捞机制
+        function toggleRadar() {
+            const toggleNode = document.getElementById('radar-toggle-node');
+            const statusText = document.getElementById('radar-status-text');
+            const container = document.querySelector('.radar-toggle-container');
+
+            radarActive = !radarActive;
+
+            if (radarActive) {
+                toggleNode.style.transform = 'translateX(26px)';
+                container.style.background = 'rgba(90, 115, 142, 0.15)';
+                container.style.borderColor = 'var(--starlight-silver)';
+                statusText.innerText = '接收状态：正在捕获 / ACTIVE';
+                statusText.style.color = 'var(--starlight-silver)';
+
+                setTimeout(() => {
+                    catchBottle();
+                    setTimeout(() => {
+                        resetRadar();
+                    }, 1000);
+                }, 800);
+            }
+        }
+
+        function resetRadar() {
+            radarActive = false;
+            const toggleNode = document.getElementById('radar-toggle-node');
+            const statusText = document.getElementById('radar-status-text');
+            const container = document.querySelector('.radar-toggle-container');
+            
+            if (toggleNode && statusText && container) {
+                toggleNode.style.transform = 'translateX(0)';
+                container.style.background = 'rgba(10, 6, 18, 0.8)';
+                container.style.borderColor = 'rgba(90, 115, 142, 0.3)';
+                statusText.innerText = '接收状态：等待捕获 / STANDBY';
+                statusText.style.color = 'rgba(90, 115, 142, 0.75)';
+            }
+        }
+
+        // 调用 Coze API（集成 1.5 秒最小渲染时长锁，确保扫描线绝不瞬退）
+        async function requestCozeAI() {
+            const zodiac = selectedZodiac;
+            const mbti = selectedMbti;
+            const content = document.getElementById('txt-content').value || '今天的工作计划又被打乱了';
+
+            if (!selectedZodiac && !selectedMbti) {
+                alert('提示：请在下方波段中至少激活一个波段，观测站才能开始读取。');
+                return;
+            }
+
+            switchView('view-loading');
+            const scanStart = Date.now(); // 1. 锁置起点时间戳
+
+            const zodiacText = zodiac ? zodiac : '无（不需要包含星座及任何动物隐喻，仅针对MBTI特性生成）';
+            const mbtiText = mbti ? mbti : '无（不需要包含MBTI性格分类，仅针对星座动物隐喻特性生成）';
+            const promptInput = `星座:${zodiacText} | MBTI:${mbtiText} | 用户糟心事:${content}`;
+
+            const triggerLocalFallback = () => {
+                const elapsed = Date.now() - scanStart;
+                const remaining = Math.max(0, 1500 - elapsed); // 强锁 1.5s 最低对焦时间
+
+                setTimeout(() => {
+                    useFallbackMockData(zodiac, mbti, content);
+                }, remaining);
+            };
+
+            if (!COZE_API_KEY.startsWith('pat_') || BOT_ID.startsWith('7369')) {
+                triggerLocalFallback();
+                return;
+            }
+
+            try {
+                // 1. 发起 Chat 请求
+                const response = await fetch('https://api.coze.cn/v3/chat', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${COZE_API_KEY}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        bot_id: BOT_ID,
+                        user_id: "demo_" + Math.random().toString(36).substr(2, 5),
+                        stream: false,
+                        additional_messages: [{ role: "user", content: promptInput, content_type: "text" }]
+                    })
+                });
+                
+                const resData = await response.json();
+                if (!resData.data || !resData.data.id) {
+                    throw new Error("API连接异常");
+                }
+                const chatId = resData.data.id;
+                const threadId = resData.data.thread_id;
+
+                let status = 'in_progress';
+                let pollRetries = 0;
+                while (status === 'in_progress' && pollRetries < 8) {
+                    await new Promise(r => setTimeout(r, 800));
+                    const pollRes = await fetch(`https://api.coze.cn/v3/chat/retrieve?chat_id=${chatId}&thread_id=${threadId}`, {
+                        headers: { 'Authorization': `Bearer ${COZE_API_KEY}` }
+                    });
+                    const pollData = await pollRes.json();
+                    status = pollData.data.status;
+                    pollRetries++;
+                }
+
+                const msgRes = await fetch('https://api.coze.cn/v3/chat/message/list?chat_id=' + chatId + '&thread_id=' + threadId, {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${COZE_API_KEY}` }
+                });
+                const msgData = await msgRes.json();
+                const assistantMsg = msgData.data.find(m => m.role === 'assistant' && m.type === 'answer');
+
+                if (!assistantMsg) throw new Error("大模型超时");
+
+                let rawText = assistantMsg.content.trim();
+                const jsonMatch = rawText.match(/\{[\s\S]*\}/);
+                if (!jsonMatch) throw new Error("格式解析错误");
+                
+                const aiObj = JSON.parse(jsonMatch[0]);
+
+                const elapsed = Date.now() - scanStart;
+                const remaining = Math.max(0, 1500 - elapsed);
+
+                setTimeout(() => {
+                    renderResultCard(aiObj);
+                }, remaining);
+
+            } catch (err) {
+                console.warn('API调用受阻，已无缝唤醒本地情绪生成引擎：', err.message);
+                triggerLocalFallback();
+            }
+        }
+
+        // 本地降级算法
+        function useFallbackMockData(zodiac, mbti, content) {
+            let decl = "";
+            let nick = "";
+            let tags = [];
+
+            if (zodiac && mbti) {
+                nick = `「一边摆烂一边焦虑的${zodiac.substring(0, 2)}${mbti}理想主义者」`;
+                decl = `「精神轨迹扫描 / Trajectory」\n你已经习惯了，在电梯里整理好情绪，然后推门继续工作。今天在输入框里打下的“${content}”，其实今晚被你删掉过三版。\n\n「双轨引力纠缠 / Entanglement」\n白天总是在忙着宽慰身边的每一个人，但深夜里只有你自己知道，有些防线在“${content}”面前，其实一戳就会碎得无声无息。\n\n「宇宙寂静回响 / Echo」\n后来你已经很少在人前大声崩溃了，因为明天早上，还要继续准时早起。`;
+                tags = [`#${zodiac}观测波段`, `#${mbti}`, `#深夜电台`];
+            } else if (zodiac) {
+                nick = `「习惯在深夜精神内耗的${zodiac.substring(0, 2)}静音观察者」`;
+                decl = `「精神轨迹扫描 / Trajectory」\n凌晨两点还不肯去睡。不是真的不困，只是因为只有在闭上眼之前，今天才算是真正属于你自己的时间。\n\n「双轨引力纠缠 / Entanglement」\n嘴上说无所谓“${content}”，其实那些无心的一两句评价，早已被你在漆黑的房间里反复复盘到刺痛。\n\n「宇宙寂静回响 / Echo」\n你不是想熬夜，你只是想从紧绷的一天里，多偷出一分钟真正的呼吸。`;
+                tags = [`#${zodiac}观测波段`, `#情绪出逃`, `#不肯睡的人`];
+            } else if (mbti) {
+                nick = `「表面体面内心发疯的${mbti}理性机器」`;
+                decl = `「精神轨迹扫描 / Trajectory」\n成年人的疲惫，通常安静到没有一个人能发现。在应付“${content}”时，你连眼神都没有透露出一丝异样。\n\n「双轨引力纠缠 / Entanglement」\n逻辑支撑着你的体面，让你习惯在解决所有火烧眉毛的问题后，最后才在无人的车库或洗手间里允许自己难过。\n\n「宇宙寂静回响 / Echo」\n你的理性，正在长期以静音的模式，默默压制你的情绪。`;
+                tags = [`#${mbti}特质`, `#理智压制`, `#安静崩溃`];
+            }
+
+            const mockData = {
+                nickname: nick,
+                declaration: decl,
+                tags: tags,
+                echo: `今日宇宙共振数据显示：有 ${Math.floor(Math.random() * 200) + 100} 个同频灵魂正在深夜在聊天框里打出“没事”并悄悄撤回。`
+            };
+
+            renderResultCard(mockData);
+        }
+
+        // html2canvas 渲染并保存共振卡片为图片
+        async function saveCardAsImage() {
+            const card = document.getElementById('tarot-card-render');
+            if (!card) return;
+            try {
+                const canvasElement = await html2canvas(card, {
+                    backgroundColor: '#06050a', 
+                    scale: 2, // 提高导出清晰度
+                    useCORS: true,
+                    logging: false
+                });
+                const image = canvasElement.toDataURL("image/png");
+                const link = document.createElement('a');
+                link.download = `cosmic_resonance_${Date.now()}.png`;
+                link.href = image;
+                link.click();
+            } catch (err) {
+                console.error("生成截图时发生异常：", err);
+                alert("截图生成受阻，请尝试使用手机系统自带的截屏功能。");
+            }
+        }
+
+        function renderResultCard(data) {
+            currentAIData = data;
+            document.getElementById('card-nickname').innerText = data.nickname;
+            document.getElementById('card-body').innerText = data.declaration;
+            document.getElementById('card-echo').innerText = data.echo;
+
+            const tagsContainer = document.getElementById('card-tags');
+            tagsContainer.innerHTML = '';
+            if (data.tags && Array.isArray(data.tags)) {
+                data.tags.forEach(tag => {
+                    const span = document.createElement('span');
+                    span.className = 'tag';
+                    span.innerText = tag;
+                    tagsContainer.appendChild(span);
+                });
+            }
+
+            // 动态按钮状态机：根据自发还是接收他人来切换操作组
+            const actionArea = document.getElementById('result-action-area');
+            if (isViewingOthers) {
+                document.getElementById('result-subtitle').innerText = "来自太空中某个不知名角落发来的微弱共振频段";
+                document.getElementById('card-channel').innerText = "SIGNAL MATCHED";
+                document.getElementById('card-channel').style.borderColor = "var(--dusty-blue)";
+                
+                actionArea.innerHTML = `
+                    <button class="btn-premium-cosmic" onclick="sendUnderstandEcho()">传达：我懂你共鸣</button>
+                    <button class="btn-premium-outline" onclick="saveCardAsImage()">保存当前共振卡片</button>
+                    <button class="btn-premium-outline" onclick="catchBottle()">调节频道</button>
+                    <button class="btn-premium-outline" onclick="switchView('view-home')">回到星盘</button>
+                `;
+            } else {
+                document.getElementById('result-subtitle').innerText = "在无垠星河中，成功捕捉到你的专属波长";
+                document.getElementById('card-channel').innerText = "SIGNAL DECODED";
+                document.getElementById('card-channel').style.borderColor = "rgba(90, 115, 142, 0.2)";
+                
+                actionArea.innerHTML = `
+                    <button class="btn-premium-cosmic" onclick="copyCardText()">一键复制这句心里话</button>
+                    <button class="btn-premium-outline" onclick="saveCardAsImage()">保存当前共振卡片</button>
+                    <button class="btn-premium-outline" onclick="requestCozeAI()">换一个文案重新扫描</button>
+                    <button class="btn-premium-outline" onclick="throwLocalBottle()">密封抛向宇宙星河</button>
+                    <button class="btn-premium-outline" onclick="switchView('view-home')">回到星盘</button>
+                `;
+            }
+
+            switchView('view-result');
+        }
+
+        // 传达共鸣逻辑
+        function sendUnderstandEcho() {
+            alert('宇宙共鸣发射成功！对方的“我的瓶子”面板中将亮起一颗星。');
+        }
+
+        // 一键复制
+        function copyCardText() {
+            const rawText = document.getElementById('card-body').innerText;
+            const textToCopy = `${document.getElementById('card-nickname').innerText}\n\n${rawText}\n\n${document.getElementById('card-echo').innerText}`;
+            
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(textToCopy).then(() => {
+                    alert('心里话已复制到剪贴板，快去发送吧！');
+                }).catch(err => {
+                    fallbackCopyText(textToCopy);
+                });
+            } else {
+                fallbackCopyText(textToCopy);
+            }
+        }
+
+        function fallbackCopyText(text) {
+            const textArea = document.createElement("textarea");
+            textArea.value = text;
+            textArea.style.position = "fixed"; 
+            document.body.appendChild(textArea);
+            textArea.focus();
+            textArea.select();
+            try {
+                document.execCommand('copy');
+                alert('心里话已复制到剪贴板，快去发送吧！');
+            } catch (err) {
+                alert('复制失败，请手动选择复制。');
+            }
+            document.body.removeChild(textArea);
+        }
+
+        function throwLocalBottle() {
+            if (!currentAIData) return;
+            let bottles = JSON.parse(localStorage.getItem('galaxy_bottles') || '[]');
+            bottles.push(currentAIData);
+            localStorage.setItem('galaxy_bottles', JSON.stringify(bottles));
+            alert('精神信号已密封，发射向无垠星河。');
+            switchView('view-home');
+        }
+
+        // 双向闭环：接收/捕获别人的频率（微调频道）
+        function catchBottle() {
+            isViewingOthers = true; // 状态标记为查看他人
+            const scanStart = Date.now(); // 1. 锁死起点时间戳
+            
+            // 扫描仪动效文本重载
+            document.getElementById('loading-title').innerText = "正在微调星际频道...";
+            document.getElementById('loading-tip').innerText = "正在对焦偏转轨道，过滤多余嘈杂声波...";
+
+            switchView('view-loading');
+
+            const triggerLocalFallback = () => {
+                const elapsed = Date.now() - scanStart;
+                const remaining = Math.max(0, 1500 - elapsed); // 动态计算，强锁最少 1.5s
+
+                setTimeout(() => {
+                    let bottles = JSON.parse(localStorage.getItem('galaxy_bottles') || '[]');
+                    if (bottles.length === 0) {
+                        const fallbackOtherPool = [
+                            {
+                                nickname: "「凌晨两点还不肯去睡的理想主义者」",
+                                declaration: "「精神轨迹扫描 / Trajectory」\n凌晨两点还不肯去睡。不是真的不困，只是因为只有在闭上眼之前，今天才算是真正属于你自己的时间。\n\n「双轨引力纠缠 / Entanglement」\n嘴上说无所谓，其实那些无心的一两句评价，早已被你在漆黑的房间里反复复盘到刺痛。\n\n「宇宙寂静回响 / Echo」\n你不是想熬夜，你只是想从紧绷的一天里，多偷出一分钟真正的呼吸。",
+                                tags: ["#天蝎观测波段", "#INFP", "#深夜低语"],
+                                echo: "今日宇宙共振数据显示：有 341 个同频灵魂正在聊天框里输入心里话又悄悄删掉。"
+                            },
+                            {
+                                nickname: "「表面体面内心发疯的执行机器」",
+                                declaration: "「精神轨迹扫描 / Trajectory」\n你已经习惯了，在电梯里整理好情绪，然后推门继续微笑。聊天框里的“没事”，其实今晚被你删掉过三版。\n\n「双轨引力纠缠 / Entanglement」\n逻辑支撑着你的体面，让你习惯在解决所有火烧眉毛的问题后，最后才在无人的洗手间里允许自己难过。\n\n「宇宙寂静回响 / Echo」\n你的理性，正在长期以静音的模式，默默压制你的情绪。",
+                                tags: ["#摩羯观测波段", "#INTJ", "#理智压制"],
+                                echo: "今日宇宙共振数据显示：有 189 个同频灵魂在电梯里整理面部表情。"
+                            }
+                        ];
+                        const pickedMock = fallbackOtherPool[Math.floor(Math.random() * fallbackOtherPool.length)];
+                        renderResultCard(pickedMock);
+                    } else {
+                        const randomIdx = Math.floor(Math.random() * bottles.length);
+                        const picked = bottles[randomIdx];
+                        renderResultCard(picked);
+                    }
+                }, remaining);
+            };
+
+            triggerLocalFallback();
+        }
+
+        // ==================== 🌠 NATIVE CANVAS PARTICLE STARFIELD (60FPS) ====================
+        const container = document.querySelector('.tarot-container');
+        const canvas = document.getElementById('space-canvas');
+        const ctx = canvas.getContext('2d');
+        
+        let width = canvas.width = container.clientWidth || 396;
+        let height = canvas.height = container.clientHeight || 800; 
+
+        const stars = [];
+        const shootingStars = []; 
+        const ripples = [];
+        const diskParticles = []; // 3D 吸积盘流体粒子
+
+        // 1. 初始化 90 个深空背景慢流浪星点
+        for (let i = 0; i < 90; i++) {
+            stars.push({
+                x: Math.random() * width,
+                y: Math.random() * height,
+                size: Math.random() * 1.2,
+                alpha: Math.random(),
+                phase: Math.random() * Math.PI * 2, 
+                twinkleSpeed: 0.005 + Math.random() * 0.015, 
+                vx: -0.04 + Math.random() * 0.08, 
+                vy: -0.04 + Math.random() * 0.08
+            });
+        }
+
+        // 2. 初始化 3D 物理级吸积盘粒子群 (Gargantua 3D Accretion Flow)
+        const numDiskParticles = 165; 
+
+        for (let i = 0; i < numDiskParticles; i++) {
+            const rad = bh_horizon * 1.01 + Math.pow(Math.random(), 1.8) * bh_horizon * 1.15;
+            const speed = 0.00025 + 0.006 * Math.pow(bh_horizon / rad, 1.8);
+            
+            diskParticles.push({
+                radius: rad,
+                angle: Math.random() * Math.PI * 2,
+                offsetY: -3 + Math.random() * 6, // 3D吸积盘厚度轴
+                speed: speed,
+                size: 0.5 + Math.random() * 0.8,
+                colorAlpha: 0.35 + Math.random() * 0.55 
+            });
+        }
+
+        window.addEventListener('resize', () => {
+            if (container) {
+                width = canvas.width = container.clientWidth;
+                height = canvas.height = container.clientHeight;
+                bh_horizon = height < 740 ? 50 : 70;
+            }
+        });
+
+        container.addEventListener('click', (e) => {
+            const rect = container.getBoundingClientRect();
+            const clickX = e.clientX - rect.left;
+            const clickY = e.clientY - rect.top;
+            spawnRipple(clickX, clickY);
+        });
+
+        function spawnRipple(x, y) {
+            ripples.push({
+                x: x,
+                y: y,
+                r: 1,
+                maxR: 50,
+                alpha: 0.5
+            });
+        }
+
+        function spawnShootingStar() {
+            if (Math.random() < 0.012 && shootingStars.length < 2) {
+                shootingStars.push({
+                    x: Math.random() * width * 0.5,
+                    y: Math.random() * height * 0.3,
+                    vx: 3.5 + Math.random() * 3, 
+                    vy: 2.0 + Math.random() * 2,
+                    len: 40 + Math.random() * 30, 
+                    alpha: 1.0
+                });
+            }
+        }
+
+        // 核心技术：爱因斯坦引力透镜 3D 深度排序与引力跃迁渲染内核
+        function drawSpace() {
+            ctx.fillStyle = '#06050a';
+            ctx.fillRect(0, 0, width, height);
+
+            const anchor = document.getElementById('bh-anchor');
+            const homeView = document.getElementById('view-home');
+            
+            let cx = width / 2;
+            let cy = height * 0.36; 
+
+            if (anchor && homeView && homeView.classList.contains('active')) {
+                const rect = anchor.getBoundingClientRect();
+                const containerRect = container.getBoundingClientRect();
+                cx = rect.left - containerRect.left + rect.width / 2;
+                cy = rect.top - containerRect.top + rect.height / 2;
+            }
+
+            // 1. 渲染背景暗星云晕轮
+            const grad = ctx.createRadialGradient(cx, cy, 10, cx, cy, width * 0.8);
+            grad.addColorStop(0, 'rgba(90, 115, 142, 0.04)');
+            grad.addColorStop(0.6, 'rgba(107, 92, 117, 0.02)');
+            grad.addColorStop(1, 'rgba(0,0,0,0)');
+            ctx.fillStyle = grad;
+            ctx.fillRect(0, 0, width, height);
+
+            // 2. 渲染背景慢流浪恒星
+            stars.forEach(star => {
+                if (gravity_collapse) {
+                    let dx = cx - star.x;
+                    let dy = cy - star.y;
+                    let dist = Math.sqrt(dx*dx + dy*dy);
+                    star.x += (dx / dist) * 2.5 * star_speed_multiplier;
+                    star.y += (dy / dist) * 2.5 * star_speed_multiplier;
+                    
+                    if (dist < current_bh_horizon) {
+                        star.x = Math.random() * width;
+                        star.y = Math.random() * height;
+                    }
+                } else {
+                    star.x += star.vx;
+                    star.y += star.vy;
+                    if (star.x < 0) star.x = width;
+                    if (star.x > width) star.x = 0;
+                    if (star.y < 0) star.y = height;
+                    if (star.y > height) star.y = 0;
+                }
+
+                star.phase += star.twinkleSpeed;
+                const dynamicAlpha = 0.2 + Math.abs(Math.sin(star.phase)) * 0.8; 
+                const dynamicSize = star.size * (1 + Math.sin(star.phase) * 0.15); 
+
+                ctx.fillStyle = `rgba(255, 255, 255, ${dynamicAlpha * 0.65})`; 
+                ctx.beginPath();
+                ctx.arc(star.x, star.y, dynamicSize, 0, Math.PI * 2);
+                ctx.fill();
+            });
+
+            // 3. 渲染偶发星际流星
+            spawnShootingStar();
+            for (let i = shootingStars.length - 1; i >= 0; i--) {
+                const s = shootingStars[i];
+                const starGrad = ctx.createLinearGradient(s.x, s.y, s.x - s.vx * s.len * 0.1, s.y - s.vy * s.len * 0.1);
+                starGrad.addColorStop(0, `rgba(255, 255, 255, ${s.alpha * 0.95})`);
+                starGrad.addColorStop(0.2, `rgba(90, 115, 142, ${s.alpha * 0.5})`);
+                starGrad.addColorStop(1, 'rgba(0,0,0,0)');
+
+                ctx.strokeStyle = starGrad;
+                ctx.lineWidth = 1.2;
+                ctx.beginPath();
+                ctx.moveTo(s.x, s.y);
+                ctx.lineTo(s.x - s.vx * 3, s.y - s.vy * 3); 
+                ctx.stroke();
+
+                s.x += s.vx;
+                s.y += s.vy;
+                s.alpha -= 0.02; 
+
+                if (s.alpha <= 0 || s.x > width || s.y > height) {
+                    shootingStars.splice(i, 1);
+                }
+            }
+
+            // 4. 渲染 3D 物理级吸积盘与发光晕
+            if (homeView && homeView.classList.contains('active')) {
+                const tiltAngle = -0.21; 
+
+                const cosTilt = Math.cos(tiltAngle);
+                const sinTilt = Math.sin(tiltAngle);
+
+                // --- 4a. 物理重构 1：黑洞发光吸积气云盘缓慢温和“呼吸感” ---
+                const slowGlowPhase = (Date.now() / 2000) % (Math.PI * 2); 
+                const breathingScale = 1.0 + Math.sin(slowGlowPhase) * 0.08; 
+                const glowRad = current_bh_horizon * 1.65 * breathingScale;
+
+                const haloGrad = ctx.createRadialGradient(cx, cy, bh_horizon * 0.85, cx, cy, glowRad);
+                haloGrad.addColorStop(0, 'rgba(255, 255, 255, 0.35)');   
+                haloGrad.addColorStop(0.25, 'rgba(255, 255, 255, 0.15)'); 
+                haloGrad.addColorStop(0.65, 'rgba(255, 255, 255, 0.05)'); 
+                haloGrad.addColorStop(1, 'rgba(255, 255, 255, 0)');       
+
+                ctx.fillStyle = haloGrad;
+                ctx.beginPath();
+                ctx.arc(cx, cy, glowRad, 0, Math.PI * 2);
+                ctx.fill();
+
+                // --- 4b. 绘制绝对纯黑事件视界 ---
+                ctx.fillStyle = '#000000';
+                ctx.beginPath();
+                ctx.arc(cx, cy, current_bh_horizon - 1, 0, Math.PI * 2);
+                ctx.fill();
+
+                // --- 4c. 核心大升级：将所有吸积盘粒子置于黑洞视界上方 ---
+                ctx.shadowColor = '#ffffff';
+                ctx.shadowBlur = 6; 
+
+                diskParticles.forEach(p => {
+                    p.angle += p.speed * star_speed_multiplier; 
+                    
+                    let curRad = p.radius;
+                    if (gravity_collapse) {
+                        let scaleFactor = transitionProgress < 0.3 ? (transitionProgress / 0.3) : ((1.0 - transitionProgress) / 0.7);
+                        curRad = p.radius * (1.0 - 0.15 * scaleFactor);
+                    }
+
+                    const x3d = Math.cos(p.angle) * curRad;
+                    const z3d = Math.sin(p.angle) * curRad; 
+                    const y3d = p.offsetY;
+
+                    const y_tilted = y3d * cosTilt - z3d * sinTilt;
+                    const z_tilted = y3d * sinTilt + z3d * cosTilt;
+
+                    let projX, projY;
+                    if (z_tilted < 0) {
+                        const angle_polar = Math.atan2(y_tilted, x3d);
+                        const lensed_dist = current_bh_horizon + 2.0 + (curRad - current_bh_horizon) * 0.25; 
+                        
+                        projX = cx + Math.cos(angle_polar) * lensed_dist;
+                        projY = cy + Math.sin(angle_polar) * lensed_dist;
+                    } else {
+                        projX = cx + x3d;
+                        projY = cy + y_tilted;
+                    }
+
+                    const depthFactor = z_tilted < 0 ? 0.65 : 1.0;
+                    const finalOpacity = Math.min(1.0, p.colorAlpha * 1.15 * depthFactor);
+
+                    ctx.fillStyle = `rgba(255, 255, 255, ${finalOpacity})`;
+                    ctx.beginPath();
+                    ctx.arc(projX, projY, p.size * 1.1, 0, Math.PI * 2);
+                    ctx.fill();
+                });
+
+                ctx.shadowBlur = 0;
+            }
+
+            // 5. 渲染触摸引力波纹
+            for (let i = ripples.length - 1; i >= 0; i--) {
+                const r = ripples[i];
+                ctx.strokeStyle = `rgba(90, 115, 142, ${r.alpha * 0.5})`;
+                ctx.lineWidth = 0.5;
+                ctx.beginPath();
+                ctx.arc(r.x, r.y, r.r, 0, Math.PI * 2);
+                ctx.stroke();
+
+                r.r += 1.5;
+                r.alpha -= 0.015;
+
+                if (r.alpha <= 0) {
+                    ripples.splice(i, 1);
+                }
+            }
+
+            requestAnimationFrame(drawSpace);
+        }
+
+        drawSpace();
+    </script>
+</body>
+</html>
